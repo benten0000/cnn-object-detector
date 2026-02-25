@@ -17,5 +17,3 @@ log_every: 20
 base: 32
 S: 13
 C: null
-
-synthetic: false

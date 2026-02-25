@@ -1,6 +1,5 @@
 import torch
 
-
 def build_targets(
     boxes_xywh_norm: torch.Tensor,  # [N, M, 4]
     classes: torch.Tensor,  # [N, M]

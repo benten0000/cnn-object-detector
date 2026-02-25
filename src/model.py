@@ -21,23 +21,23 @@ class ConvBNActivation(nn.Module):
 class Backbone(nn.Module):
     def __init__(self, c_in: int = 3, base: int = 32):
         super().__init__()
-        self.stem = ConvBNActivation(c_in, base, kernel_size=3, stride=2) # 208
+        self.stem = ConvBNActivation(c_in, base, kernel_size=3, stride=2)  # [N, c_in, 416, 416] -> [N, base, 208, 208]
         self.s1 = nn.Sequential(
             ConvBNActivation(base, base * 2, kernel_size=3, stride=2),
             ConvBNActivation(base * 2, base * 2, kernel_size=3),
-        )  # 104
+        )  # [N, base, 208, 208] -> [N, 2*base, 104, 104]
         self.s2 = nn.Sequential(
             ConvBNActivation(base * 2, base * 4, kernel_size=3, stride=2),
             ConvBNActivation(base * 4, base * 4, kernel_size=3),
-        )  # 52
+        )  # [N, 2*base, 104, 104] -> [N, 4*base, 52, 52]
         self.s3 = nn.Sequential(
             ConvBNActivation(base * 4, base * 8, kernel_size=3, stride=2),
             ConvBNActivation(base * 8, base * 8, kernel_size=3),
-        )  # 26
+        )  # [N, 4*base, 52, 52] -> [N, 8*base, 26, 26]
         self.s4 = nn.Sequential(
             ConvBNActivation(base * 8, base * 16, kernel_size=3, stride=2),
             ConvBNActivation(base * 16, base * 16, kernel_size=3),
-        )  # 13
+        )  # [N, 8*base, 26, 26] -> [N, 16*base, 13, 13]
     
     def forward(self, x):
         x = self.stem(x)
@@ -52,10 +52,10 @@ class YOLOv1(nn.Module):
     def __init__(self, S: int = 13, C: int = 1, base: int = 32):
         super().__init__()
         self.S, self.C = S, C
-        self.backbone = Backbone(base=base)
+        self.backbone = Backbone(base=base)  # [N, 3, 416, 416] -> [N, 16*base, 13, 13]
         D = base * 16
         out_ch = 5 + C
-        self.head = nn.Conv2d(D, out_ch, kernel_size=1, stride=1, padding=0)
+        self.head = nn.Conv2d(D, out_ch, kernel_size=1, stride=1, padding=0)  # [N, D, 13, 13] -> [N, 5+C, 13, 13]
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         f = self.backbone(x)           # [N, D, 13, 13]
