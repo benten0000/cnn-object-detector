@@ -49,16 +49,16 @@ class Backbone(nn.Module):
     
 
 class YOLOv1(nn.Module):
-    def __init__(self, S: int = 13, B: int = 2, C: int = 1, base: int = 32):
+    def __init__(self, S: int = 13, C: int = 1, base: int = 32):
         super().__init__()
-        self.S, self.B, self.C = S, B, C
+        self.S, self.C = S, C
         self.backbone = Backbone(base=base)
         D = base * 16
-        out_ch = B * 5 + C
+        out_ch = 5 + C
         self.head = nn.Conv2d(D, out_ch, kernel_size=1, stride=1, padding=0)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         f = self.backbone(x)           # [N, D, 13, 13]
-        p = self.head(f)               # [N, (B*5+C), 13, 13]
-        p = p.permute(0, 2, 3, 1).contiguous()  # [N, 13, 13, (B*5+C)]
+        p = self.head(f)               # [N, (5+C), 13, 13]
+        p = p.permute(0, 2, 3, 1).contiguous()  # [N, 13, 13, (5+C)]
         return p
