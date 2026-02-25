@@ -1,0 +1,22 @@
+images_dir: data/coco/train2017
+annotations: data/coco/annotations/instances_train2017.json
+val_images_dir: data/coco/val2017
+val_annotations: data/coco/annotations/instances_val2017.json
+out_dir: runs/exp1
+
+epochs: 10
+batch_size: 8
+num_workers: 2
+lr: 0.0001
+image_size: 416
+max_samples: null
+val_max_samples: null
+seed: 42
+log_every: 20
+
+base: 32
+S: 13
+B: 2
+C: null
+
+synthetic: false

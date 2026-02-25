@@ -1,11 +1,12 @@
-import argparse
 import json
-import tomllib
+import os
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import torch
 import torch.nn as nn
+import yaml
 from torch.utils.data import DataLoader, Dataset
 from torchvision.io import read_image
 from torchvision.transforms.functional import resize
@@ -164,134 +165,159 @@ class YoloV1Loss(nn.Module):
         }
 
 
-def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Train a tiny YOLOv1-style detector.")
-    parser.add_argument("--config", type=str, default="config/train.toml")
-    parser.add_argument("--images-dir", type=str, default="data/coco/train2017")
-    parser.add_argument("--annotations", type=str, default="data/coco/annotations/instances_train2017.json")
-    parser.add_argument("--val-images-dir", type=str, default="data/coco/val2017")
-    parser.add_argument("--val-annotations", type=str, default="data/coco/annotations/instances_val2017.json")
-    parser.add_argument("--out-dir", type=str, default="runs/exp1")
-    parser.add_argument("--epochs", type=int, default=10)
-    parser.add_argument("--batch-size", type=int, default=8)
-    parser.add_argument("--num-workers", type=int, default=2)
-    parser.add_argument("--lr", type=float, default=1e-4)
-    parser.add_argument("--image-size", type=int, default=416)
-    parser.add_argument("--max-samples", type=int, default=None)
-    parser.add_argument("--val-max-samples", type=int, default=None)
-    parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--log-every", type=int, default=20)
-    parser.add_argument("--base", type=int, default=32)
-    parser.add_argument("--S", type=int, default=13)
-    parser.add_argument("--B", type=int, default=2)
-    parser.add_argument("--C", type=int, default=None)
-    parser.add_argument("--synthetic", action="store_true", help="Use synthetic data for quick pipeline check.")
-    return parser
+@dataclass
+class TrainConfig:
+    images_dir: str = "data/coco/train2017"
+    annotations: str = "data/coco/annotations/instances_train2017.json"
+    val_images_dir: str = "data/coco/val2017"
+    val_annotations: str = "data/coco/annotations/instances_val2017.json"
+    out_dir: str = "runs/exp1"
+    epochs: int = 10
+    batch_size: int = 8
+    num_workers: int = 2
+    lr: float = 1e-4
+    image_size: int = 416
+    max_samples: int | None = None
+    val_max_samples: int | None = None
+    seed: int = 42
+    log_every: int = 20
+    base: int = 32
+    S: int = 13
+    B: int = 2
+    C: int | None = None
+    synthetic: bool = False
 
 
-def parse_args() -> argparse.Namespace:
-    parser = _build_parser()
-    pre_args, _ = parser.parse_known_args()
+def _coerce_from_text(value: str, default: Any) -> Any:
+    if default is None:
+        txt = value.strip().lower()
+        if txt in {"none", "null", ""}:
+            return None
+        try:
+            return int(value)
+        except ValueError:
+            return value
+    if isinstance(default, bool):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    if isinstance(default, int):
+        return int(value)
+    if isinstance(default, float):
+        return float(value)
+    return value
 
-    cfg_path = Path(pre_args.config)
-    if cfg_path.exists():
-        with cfg_path.open("rb") as f:
-            config_data = tomllib.load(f)
-        parser.set_defaults(**config_data)
 
-    return parser.parse_args()
+def load_config() -> TrainConfig:
+    config_path = Path(os.environ.get("TRAIN_CONFIG", "config/train.yaml"))
+    config = TrainConfig()
+
+    if config_path.exists():
+        with config_path.open("r", encoding="utf-8") as f:
+            config_data = yaml.safe_load(f) or {}
+        for key, value in config_data.items():
+            if not hasattr(config, key):
+                raise ValueError(f"Unknown config key in {config_path}: {key}")
+            setattr(config, key, value)
+
+    for key, default in asdict(config).items():
+        env_key = f"TRAIN_{key.upper()}"
+        if env_key not in os.environ:
+            continue
+        setattr(config, key, _coerce_from_text(os.environ[env_key], default))
+
+    return config
 
 
-def make_dataset(args: argparse.Namespace) -> CocoSingleObjectDataset | SyntheticDetectionDataset:
-    if args.synthetic:
-        c = 1 if args.C is None else args.C
+def make_dataset(config: TrainConfig) -> CocoSingleObjectDataset | SyntheticDetectionDataset:
+    if config.synthetic:
+        c = 1 if config.C is None else config.C
         return SyntheticDetectionDataset(
-            n_samples=256 if args.max_samples is None else args.max_samples,
-            image_size=args.image_size,
+            n_samples=256 if config.max_samples is None else config.max_samples,
+            image_size=config.image_size,
             num_classes=c,
         )
 
-    images_dir = Path(args.images_dir)
-    annotations = Path(args.annotations)
+    images_dir = Path(config.images_dir)
+    annotations = Path(config.annotations)
     if not images_dir.exists() or not annotations.exists():
         raise FileNotFoundError(
             "COCO paths not found. Extract zip files first, then run with "
-            f"--images-dir {args.images_dir} --annotations {args.annotations}."
+            f"images_dir={config.images_dir} annotations={config.annotations}."
         )
 
     return CocoSingleObjectDataset(
         images_dir=str(images_dir),
         annotations_path=str(annotations),
-        image_size=args.image_size,
-        max_samples=args.max_samples,
+        image_size=config.image_size,
+        max_samples=config.max_samples,
     )
 
 
-def make_val_dataset(args: argparse.Namespace) -> CocoSingleObjectDataset | SyntheticDetectionDataset:
-    if args.synthetic:
-        c = 1 if args.C is None else args.C
+def make_val_dataset(config: TrainConfig) -> CocoSingleObjectDataset | SyntheticDetectionDataset:
+    if config.synthetic:
+        c = 1 if config.C is None else config.C
         return SyntheticDetectionDataset(
-            n_samples=64 if args.val_max_samples is None else args.val_max_samples,
-            image_size=args.image_size,
+            n_samples=64 if config.val_max_samples is None else config.val_max_samples,
+            image_size=config.image_size,
             num_classes=c,
         )
 
-    images_dir = Path(args.val_images_dir)
-    annotations = Path(args.val_annotations)
+    images_dir = Path(config.val_images_dir)
+    annotations = Path(config.val_annotations)
     if not images_dir.exists() or not annotations.exists():
         raise FileNotFoundError(
             "COCO val paths not found. Extract zip files first, then run with "
-            f"--val-images-dir {args.val_images_dir} --val-annotations {args.val_annotations}."
+            f"val_images_dir={config.val_images_dir} val_annotations={config.val_annotations}."
         )
 
     return CocoSingleObjectDataset(
         images_dir=str(images_dir),
         annotations_path=str(annotations),
-        image_size=args.image_size,
-        max_samples=args.val_max_samples,
+        image_size=config.image_size,
+        max_samples=config.val_max_samples,
     )
 
 
 def main() -> None:
-    args = parse_args()
-    torch.manual_seed(args.seed)
+    config = load_config()
+    torch.manual_seed(config.seed)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    train_dataset = make_dataset(args)
-    val_dataset = make_val_dataset(args)
+    train_dataset = make_dataset(config)
+    val_dataset = make_val_dataset(config)
 
-    if args.C is None:
+    if config.C is None:
         inferred_c = getattr(train_dataset, "num_classes", 1)
-        args.C = inferred_c
+        config.C = inferred_c
+    num_classes = cast(int, config.C)
 
     train_loader = DataLoader(
         train_dataset,
-        batch_size=args.batch_size,
+        batch_size=config.batch_size,
         shuffle=True,
-        num_workers=args.num_workers,
+        num_workers=config.num_workers,
         pin_memory=(device.type == "cuda"),
     )
     val_loader = DataLoader(
         val_dataset,
-        batch_size=args.batch_size,
+        batch_size=config.batch_size,
         shuffle=False,
-        num_workers=args.num_workers,
+        num_workers=config.num_workers,
         pin_memory=(device.type == "cuda"),
     )
 
-    model = YOLOv1(S=args.S, B=args.B, C=args.C, base=args.base).to(device)
-    criterion = YoloV1Loss(B=args.B, C=args.C)
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+    model = YOLOv1(S=config.S, B=config.B, C=num_classes, base=config.base).to(device)
+    criterion = YoloV1Loss(B=config.B, C=num_classes)
+    optimizer = torch.optim.Adam(model.parameters(), lr=config.lr)
 
-    out_dir = Path(args.out_dir)
+    out_dir = Path(config.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     print(
         f"Training on {device} | train_samples={len(train_dataset)} | val_samples={len(val_dataset)} | "
-        f"S={args.S} B={args.B} C={args.C} | batch={args.batch_size}"
+        f"S={config.S} B={config.B} C={config.C} | batch={config.batch_size}"
     )
 
-    for epoch in range(1, args.epochs + 1):
+    for epoch in range(1, config.epochs + 1):
         model.train()
         running_total = 0.0
 
@@ -304,9 +330,9 @@ def main() -> None:
             targets = build_targets(
                 boxes_xywh_norm=boxes_xywh,
                 classes=classes,
-                S=args.S,
-                B=args.B,
-                C=args.C,
+                S=config.S,
+                B=config.B,
+                C=num_classes,
                 predictions=predictions.detach(),
             )
 
@@ -318,7 +344,7 @@ def main() -> None:
             optimizer.step()
 
             running_total += float(loss.item())
-            if step % args.log_every == 0 or step == len(train_loader):
+            if step % config.log_every == 0 or step == len(train_loader):
                 print(
                     f"epoch {epoch:03d} train step {step:04d}/{len(train_loader):04d} "
                     f"total={losses['total'].item():.4f} "
@@ -342,15 +368,15 @@ def main() -> None:
                 targets = build_targets(
                     boxes_xywh_norm=boxes_xywh,
                     classes=classes,
-                    S=args.S,
-                    B=args.B,
-                    C=args.C,
+                    S=config.S,
+                    B=config.B,
+                    C=num_classes,
                     predictions=predictions,
                 )
                 losses = criterion(predictions, targets)
                 val_running_total += float(losses["total"].item())
 
-                if step % args.log_every == 0 or step == len(val_loader):
+                if step % config.log_every == 0 or step == len(val_loader):
                     print(
                         f"epoch {epoch:03d} val   step {step:04d}/{len(val_loader):04d} "
                         f"total={losses['total'].item():.4f}"
@@ -364,7 +390,7 @@ def main() -> None:
                 "epoch": epoch,
                 "model_state_dict": model.state_dict(),
                 "optimizer_state_dict": optimizer.state_dict(),
-                "args": vars(args),
+                "config": asdict(config),
                 "train_avg_loss": train_avg_loss,
                 "val_avg_loss": val_avg_loss,
             },
