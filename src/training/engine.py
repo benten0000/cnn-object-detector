@@ -24,6 +24,8 @@ def run_epoch(
     model.train(train)
     total = 0.0
     ctx = torch.enable_grad() if train else torch.no_grad()
+    amp_enabled = bool(cfg.amp and device.type == "cuda")
+    amp_dtype = torch.bfloat16 if str(cfg.amp_dtype).lower() in {"bf16", "bfloat16"} else torch.float16
 
     with ctx:
         for step, (images, boxes, classes, valid_mask) in enumerate(loader, start=1):
@@ -32,15 +34,16 @@ def run_epoch(
             classes = classes.to(device, non_blocking=True)
             valid_mask = valid_mask.to(device, non_blocking=True)
 
-            predictions = model(images)
-            targets = build_targets(
-                boxes_xywh_norm=boxes,
-                classes=classes,
-                S=cfg.S,
-                C=num_classes,
-                valid_mask=valid_mask,
-            )
-            losses = criterion(predictions, targets)
+            with torch.autocast(device_type=device.type, dtype=amp_dtype, enabled=amp_enabled):
+                predictions = model(images)
+                targets = build_targets(
+                    boxes_xywh_norm=boxes,
+                    classes=classes,
+                    S=cfg.S,
+                    C=num_classes,
+                    valid_mask=valid_mask,
+                )
+                losses = criterion(predictions, targets)
 
             if train:
                 optimizer.zero_grad(set_to_none=True)
@@ -88,4 +91,3 @@ def save_checkpoint(
         ckpt_path,
     )
     return ckpt_path
-

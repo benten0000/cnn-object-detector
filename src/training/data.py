@@ -112,6 +112,11 @@ def make_dataset(cfg: TrainConfig, *, train: bool) -> CocoDetectionDataset:
 
 
 def make_loader(dataset: Dataset, cfg: TrainConfig, *, shuffle: bool, device: torch.device) -> DataLoader:
+    loader_kwargs: dict[str, Any] = {}
+    if cfg.num_workers > 0:
+        loader_kwargs["persistent_workers"] = cfg.persistent_workers
+        loader_kwargs["prefetch_factor"] = cfg.prefetch_factor
+
     return DataLoader(
         dataset,
         batch_size=cfg.batch_size,
@@ -119,4 +124,5 @@ def make_loader(dataset: Dataset, cfg: TrainConfig, *, shuffle: bool, device: to
         num_workers=cfg.num_workers,
         pin_memory=(device.type == "cuda"),
         collate_fn=detection_collate_fn,
+        **loader_kwargs,
     )

@@ -16,7 +16,12 @@ class TrainConfig:
     epochs: int = 10
     batch_size: int = 8
     num_workers: int = 2
+    prefetch_factor: int = 4
+    persistent_workers: bool = True
     lr: float = 1e-4
+    amp: bool = True
+    amp_dtype: str = "bf16"
+    cudnn_benchmark: bool = True
     image_size: int = 416
     max_samples: int | None = None
     val_max_samples: int | None = None
@@ -67,4 +72,3 @@ def load_config() -> TrainConfig:
             setattr(cfg, f.name, _coerce_env(os.environ[env_key], getattr(cfg, f.name)))
 
     return cfg
-

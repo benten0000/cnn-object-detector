@@ -14,6 +14,9 @@ def main() -> None:
     torch.manual_seed(cfg.seed)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if device.type == "cuda":
+        torch.backends.cudnn.benchmark = cfg.cudnn_benchmark
+        torch.set_float32_matmul_precision("high")
     train_dataset = make_dataset(cfg, train=True)
     val_dataset = make_dataset(cfg, train=False)
 
@@ -32,7 +35,7 @@ def main() -> None:
 
     print(
         f"Training on {device} | train_samples={len(train_dataset)} | val_samples={len(val_dataset)} | "
-        f"S={cfg.S} C={cfg.C} | batch={cfg.batch_size}"
+        f"S={cfg.S} C={cfg.C} | batch={cfg.batch_size} | amp={cfg.amp} ({cfg.amp_dtype})"
     )
 
     for epoch in range(1, cfg.epochs + 1):
@@ -76,4 +79,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
