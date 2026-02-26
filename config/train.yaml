@@ -4,10 +4,10 @@ val_images_dir: data/coco/val2017
 val_annotations: data/coco/annotations_trainval2017/annotations/instances_val2017.json
 out_dir: runs/exp1
 
-epochs: 10
-batch_size: 8
-num_workers: 2
-lr: 0.0001
+epochs: 80
+batch_size: 128
+num_workers: 8
+lr: 0.0004
 image_size: 416
 max_samples: null
 val_max_samples: null

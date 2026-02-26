@@ -53,6 +53,14 @@ class CocoDetectionDataset(Dataset):
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         image_info, anns = self.samples[idx]
         image = read_image(str(self.images_dir / image_info["file_name"])).float().div_(255.0)
+        if image.ndim == 2:
+            image = image.unsqueeze(0)
+        if image.shape[0] == 1:
+            image = image.repeat(3, 1, 1)
+        elif image.shape[0] > 3:
+            image = image[:3]
+        elif image.shape[0] < 3:
+            image = torch.cat([image, image[:1].repeat(3 - image.shape[0], 1, 1)], dim=0)
         image = resize(image, [self.image_size, self.image_size], antialias=True)
 
         h = float(image_info["height"])
