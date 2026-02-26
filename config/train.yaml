@@ -5,11 +5,11 @@ val_annotations: data/coco/annotations/instances_val2017.json
 out_dir: runs/exp1
 
 epochs: 80
-batch_size: 2048
+batch_size: 1024
 num_workers: 16
 prefetch_factor: 4
 persistent_workers: true
-lr: 0.0016
+lr: 0.008
 amp: true
 amp_dtype: bf16
 cudnn_benchmark: true
