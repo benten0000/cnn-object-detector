@@ -29,15 +29,19 @@ class CocoDetectionDataset(Dataset):
         self.cat_to_idx = {cat_id: i for i, cat_id in enumerate(categories)}
         self.num_classes = len(self.cat_to_idx)
 
-        anns_by_image: dict[int, list[dict[str, Any]]] = {}
-        for ann in coco["annotations"]:
+        anns_by_image: dict[int, dict[int, dict[str, Any]]] = {}
+        for ann_idx, ann in enumerate(coco["annotations"]):
             if ann.get("iscrowd", 0) == 1:
                 continue
             x, y, w, h = ann["bbox"]
             if w <= 0 or h <= 0:
                 continue
             if ann["image_id"] in images:
-                anns_by_image.setdefault(ann["image_id"], []).append(ann)
+                image_anns = anns_by_image.setdefault(ann["image_id"], {})
+                ann_id = int(ann.get("id", ann_idx))
+                while ann_id in image_anns:
+                    ann_id += 1
+                image_anns[ann_id] = ann
 
         self.samples = [(images[image_id], anns) for image_id, anns in anns_by_image.items()]
         if max_samples is not None:
@@ -56,7 +60,7 @@ class CocoDetectionDataset(Dataset):
 
         boxes = []
         classes = []
-        for ann in anns:
+        for ann in anns.values():
             x, y, bw, bh = ann["bbox"]
             boxes.append([(x + 0.5 * bw) / w, (y + 0.5 * bh) / h, bw / w, bh / h])
             classes.append(self.cat_to_idx[ann["category_id"]])
@@ -108,4 +112,3 @@ def make_loader(dataset: Dataset, cfg: TrainConfig, *, shuffle: bool, device: to
         pin_memory=(device.type == "cuda"),
         collate_fn=detection_collate_fn,
     )
-
