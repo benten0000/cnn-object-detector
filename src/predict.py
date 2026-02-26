@@ -88,8 +88,12 @@ def load_model(args: argparse.Namespace, device: torch.device) -> tuple[YOLOv1, 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Simple YOLOv1 image inference and bbox drawing.")
-    parser.add_argument("--image", type=str, required=True, help="Input image path.")
-    parser.add_argument("--out", type=str, default="prediction.png", help="Output image path.")
+    parser.add_argument("--image", type=str, default=None, help="Input image path.")
+    parser.add_argument("--image-dir", type=str, default=None, help="Input image directory.")
+    parser.add_argument("--out", type=str, default="prediction.png", help="Output image path (single image mode).")
+    parser.add_argument("--out-dir", type=str, default="runs/preds", help="Output directory (directory mode).")
+    parser.add_argument("--num-images", type=int, default=10, help="How many images to process in directory mode.")
+    parser.add_argument("--glob", type=str, default="*.jpg", help="Glob pattern in directory mode.")
     parser.add_argument("--ckpt", type=str, default=None, help="Checkpoint path. Omit for untrained model.")
     parser.add_argument("--image-size", type=int, default=416, help="Inference resize size.")
     parser.add_argument("--S", type=int, default=13, help="Grid size used when no checkpoint is loaded.")
@@ -100,37 +104,63 @@ def main() -> None:
     parser.add_argument("--topk", type=int, default=50, help="Keep top-K after NMS.")
     args = parser.parse_args()
 
+    if bool(args.image) == bool(args.image_dir):
+        raise ValueError("Use exactly one of --image or --image-dir.")
+    if args.num_images <= 0:
+        raise ValueError("--num-images must be > 0.")
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model, _, _ = load_model(args, device)
 
-    image_u8 = read_image(args.image)
-    image_u8 = _to_3ch(image_u8)
-    image_f = image_u8.float().div(255.0)
-    image_f = resize(image_f, [args.image_size, args.image_size], antialias=True)
-    input_tensor = image_f.unsqueeze(0).to(device)
+    def run_one(image_path: Path) -> tuple[torch.Tensor, int]:
+        image_u8 = read_image(str(image_path))
+        image_u8 = _to_3ch(image_u8)
+        image_f = image_u8.float().div(255.0)
+        image_f = resize(image_f, [args.image_size, args.image_size], antialias=True)
+        input_tensor = image_f.unsqueeze(0).to(device)
 
-    with torch.no_grad():
-        pred = model(input_tensor)[0]  # [S, S, 5+C]
-        boxes_norm, scores, classes = decode_predictions(
-            pred=pred,
-            score_thresh=args.score_thresh,
-            iou_thresh=args.iou_thresh,
-            topk=args.topk,
-        )
+        with torch.no_grad():
+            pred = model(input_tensor)[0]  # [S, S, 5+C]
+            boxes_norm, scores, classes = decode_predictions(
+                pred=pred,
+                score_thresh=args.score_thresh,
+                iou_thresh=args.iou_thresh,
+                topk=args.topk,
+            )
 
-    vis = (image_f * 255.0).clamp(0, 255).to(torch.uint8).cpu()
-    if boxes_norm.numel() > 0:
-        h, w = vis.shape[1], vis.shape[2]
-        boxes_px = boxes_norm.cpu().clone()
-        boxes_px[:, [0, 2]] *= float(w)
-        boxes_px[:, [1, 3]] *= float(h)
-        labels = [f"c{int(c.item())}:{float(s.item()):.2f}" for c, s in zip(classes.cpu(), scores.cpu())]
-        vis = draw_bounding_boxes(vis, boxes=boxes_px, labels=labels, width=2, colors="red")
+        vis = (image_f * 255.0).clamp(0, 255).to(torch.uint8).cpu()
+        if boxes_norm.numel() > 0:
+            h, w = vis.shape[1], vis.shape[2]
+            boxes_px = boxes_norm.cpu().clone()
+            boxes_px[:, [0, 2]] *= float(w)
+            boxes_px[:, [1, 3]] *= float(h)
+            labels = [f"c{int(c.item())}:{float(s.item()):.2f}" for c, s in zip(classes.cpu(), scores.cpu())]
+            vis = draw_bounding_boxes(vis, boxes=boxes_px, labels=labels, width=2, colors="red")
+        return vis, int(boxes_norm.shape[0])
 
-    out_path = Path(args.out)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    write_png(vis, str(out_path))
-    print(f"saved={out_path} | boxes={int(boxes_norm.shape[0])} | ckpt={'yes' if args.ckpt else 'no'}")
+    if args.image:
+        vis, n_boxes = run_one(Path(args.image))
+        out_path = Path(args.out)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        write_png(vis, str(out_path))
+        print(f"saved={out_path} | boxes={n_boxes} | ckpt={'yes' if args.ckpt else 'no'}")
+        return
+
+    image_dir = Path(args.image_dir)
+    files = sorted(image_dir.glob(args.glob))
+    if not files:
+        raise FileNotFoundError(f"No files found in {image_dir} with pattern {args.glob}")
+    files = files[: args.num_images]
+
+    out_dir = Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for img_path in files:
+        vis, n_boxes = run_one(img_path)
+        out_path = out_dir / f"{img_path.stem}_pred.png"
+        write_png(vis, str(out_path))
+        print(f"saved={out_path} | boxes={n_boxes}")
+
+    print(f"done | processed={len(files)} | dir={image_dir} | out_dir={out_dir} | ckpt={'yes' if args.ckpt else 'no'}")
 
 
 if __name__ == "__main__":
